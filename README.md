@@ -45,11 +45,11 @@ users:
     # 用户账号
   - username: by2101111
     # 用户密码
-	  password: password
+    password: password
     # 是否在校，1在校，0不在校，如果为 1，reason 和 note 字段无效
     boarder: "1"
     # 不在校理由
-	  reasen: "2"
+    reasen: "2"
     # 理由为其他时，填充的原因
     note: "回家"
 
