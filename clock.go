@@ -1,13 +1,13 @@
 package buaaclock
 
 import (
-	"bytes"
 	"encoding/json"
 	"errors"
 	"io"
 	"net/http"
 	"net/http/cookiejar"
 	"net/url"
+	"strings"
 )
 
 var (
@@ -17,7 +17,6 @@ var (
 		"Accept-Language":  `zh-CN,zh;q=0.9,en-US;q=0.8,en;q=0.7`,
 		"Cache-Control":    `no-cache`,
 		"Connection":       `keep-alive`,
-		"Content-Length":   `43`,
 		"Content-Type":     `application/x-www-form-urlencoded; charset=UTF-8`,
 		"Host":             `app.buaa.edu.cn`,
 		"Origin":           `https://app.buaa.edu.cn`,
@@ -31,16 +30,49 @@ var (
 		"User-Agent":       `Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/92.0.4515.159 Safari/537.36`,
 		"X-Requested-With": `XMLHttpRequest`,
 	}
-)
 
-type loginReqBody struct {
-	Username string `json:"username"`
-	Password string `json:"password"`
-}
+	infoHeader = map[string]string{
+		"Accept":           `application/json, text/plain, */*`,
+		"Accept-Encoding":  `gzip, deflate, br`,
+		"Accept-Language":  `zh-CN,zh;q=0.9,en-US;q=0.8,en;q=0.7`,
+		"Cache-Control":    `no-cache`,
+		"Connection":       `keep-alive`,
+		"Host":             `app.buaa.edu.cn`,
+		"Pragma":           `no-cache`,
+		"Referer":          `https://app.buaa.edu.cn/site/buaaStudentNcov/index`,
+		"sec-ch-ua":        `"Chromium";v="92", " Not A;Brand";v="99", "Google Chrome";v="92"`,
+		"sec-ch-ua-mobile": `?0`,
+		"Sec-Fetch-Dest":   `empty`,
+		"Sec-Fetch-Mode":   `cors`,
+		"Sec-Fetch-Site":   `same-origin`,
+		"User-Agent":       `Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/92.0.4515.159 Safari/537.36`,
+		"X-Requested-With": `XMLHttpRequest`,
+	}
+)
 
 type loginRespBody struct {
 	E int    `json:"e"`
 	M string `json:"m"`
+}
+
+type infoDUInfoRole struct {
+	Number string `json:"number"`
+}
+
+type infoDUinfo struct {
+	Realname string         `json:"realname"`
+	Role     infoDUInfoRole `json:"role"`
+}
+
+type infoD struct {
+	UInfo infoDUinfo     `json:"uinfo"`
+	Info  map[string]any `json:"info"`
+}
+
+type infoRespBody struct {
+	E int    `json:"e"`
+	M string `json:"m"`
+	D infoD  `json:"d"`
 }
 
 type Clock struct {
@@ -57,7 +89,7 @@ type Clock struct {
 }
 
 func NewClock(configs ...Config) *Clock {
-	cfg := overwriteConfig(configs...)
+	cfg := configDefault(configs...)
 	jar, _ := cookiejar.New(nil)
 
 	return &Clock{
@@ -74,26 +106,20 @@ func NewClock(configs ...Config) *Clock {
 }
 
 func (c *Clock) login() error {
-	url, err := url.Parse(c.loginURL)
+	path, err := url.Parse(c.loginURL)
 	if err != nil {
 		return err
 	}
 
 	// set body
-	data := loginReqBody{
-		Username: c.username,
-		Password: c.password,
-	}
-
-	jsonBody, err := json.Marshal(data)
-	if err != nil {
-		return err
-	}
+	reqVal := url.Values{}
+	reqVal.Add("username", c.username)
+	reqVal.Add("password", c.password)
 
 	req := &http.Request{
 		Method: http.MethodPost,
-		URL:    url,
-		Body:   io.NopCloser(bytes.NewReader(jsonBody)),
+		URL:    path,
+		Body:   io.NopCloser(strings.NewReader(reqVal.Encode())),
 	}
 
 	// set header
@@ -118,7 +144,7 @@ func (c *Clock) login() error {
 	body := loginRespBody{}
 	err = json.Unmarshal(respBody, &body)
 	if err != nil {
-		return nil
+		return err
 	}
 
 	if body.E != 0 {
@@ -128,44 +154,82 @@ func (c *Clock) login() error {
 	return nil
 }
 
-func (c *Clock) info() error {
+func (c *Clock) info() (*infoRespBody, error) {
+	url, err := url.Parse(c.infoURL)
+	if err != nil {
+		return nil, err
+	}
+
+	req := &http.Request{
+		Method: http.MethodGet,
+		URL:    url,
+	}
+
+	// set header
+	for k, v := range infoHeader {
+		req.Header.Add(k, v)
+	}
+
+	resp, err := c.client.Do(req)
+	if err != nil {
+		return nil, err
+	}
+
+	if resp.StatusCode != 200 {
+		return nil, errors.New("info request error with status " + resp.Status)
+	}
+
+	respBody, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, err
+	}
+
+	body := infoRespBody{}
+	err = json.Unmarshal(respBody, &body)
+	if err != nil {
+		return nil, err
+	}
+
+	if body.E != 0 {
+		return nil, errors.New(body.M)
+	}
+
+	return &body, nil
+}
+
+func (c *Clock) save(info *infoRespBody) error {
 	return nil
 }
 
-func (c *Clock) save() error {
+func (c *Clock) exec() error {
+	if err := c.login(); err != nil {
+		return err
+	}
+
+	infoBody, err := c.info()
+	if err != nil {
+		return err
+	}
+
+	if err := c.save(infoBody); err != nil {
+		return err
+	}
+
 	return nil
 }
 
 func (c *Clock) Exec() error {
-	count, success := 0, false
+	if c.retry != 0 {
+		retry := NewExponentialBackoff(RetryConfig{
+			MaxRetryCount: c.retry,
+		})
+
+		return retry.Retry(c.exec)
+	}
 
 	for {
-		// return when success
-		if success {
+		if err := c.exec(); err == nil {
 			return nil
 		}
-
-		// return when fail count larger than retry count
-		if c.retry != 0 && count >= c.retry {
-			return errors.New("can't clock, please try again")
-		}
-
-		if err := c.login(); err != nil {
-			count++
-			continue
-		}
-
-		if err := c.info(); err != nil {
-			count++
-			continue
-		}
-
-		if err := c.save(); err != nil {
-			count++
-			continue
-		}
-
-		count++
-		success = true
 	}
 }

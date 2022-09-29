@@ -11,14 +11,14 @@ type Config struct {
 	Password string
 }
 
-func overwriteConfig(configs ...Config) Config {
-	defaultConfig := Config{
-		LoginURL: "https://app.buaa.edu.cn/uc/wap/login/check",
-		InfoURL:  "https://app.buaa.edu.cn/buaaxsncov/wap/default/get-info",
-		SaveURL:  "https://app.buaa.edu.cn/buaaxsncov/wap/default/save",
-		Retry:    0,
-	}
+var defaultConfig = Config{
+	LoginURL: "https://app.buaa.edu.cn/uc/wap/login/check",
+	InfoURL:  "https://app.buaa.edu.cn/buaaxsncov/wap/default/get-info",
+	SaveURL:  "https://app.buaa.edu.cn/buaaxsncov/wap/default/save",
+	Retry:    10,
+}
 
+func configDefault(configs ...Config) Config {
 	if len(configs) == 0 {
 		return defaultConfig
 	}
@@ -26,28 +26,20 @@ func overwriteConfig(configs ...Config) Config {
 	cfg := configs[0]
 
 	if cfg.LoginURL != "" {
-		defaultConfig.LoginURL = cfg.LoginURL
+		cfg.LoginURL = defaultConfig.LoginURL
 	}
 
 	if cfg.InfoURL != "" {
-		defaultConfig.InfoURL = cfg.InfoURL
+		cfg.InfoURL = defaultConfig.InfoURL
 	}
 
 	if cfg.SaveURL != "" {
-		defaultConfig.SaveURL = cfg.SaveURL
+		cfg.SaveURL = defaultConfig.SaveURL
 	}
 
 	if cfg.Retry != 0 {
-		defaultConfig.Retry = cfg.Retry
+		cfg.Retry = defaultConfig.Retry
 	}
 
-	if cfg.UserName != "" {
-		defaultConfig.UserName = cfg.UserName
-	}
-
-	if cfg.Password != "" {
-		defaultConfig.Password = cfg.Password
-	}
-
-	return defaultConfig
+	return cfg
 }
