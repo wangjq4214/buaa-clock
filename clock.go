@@ -1,8 +1,10 @@
 package buaaclock
 
 import (
+	"compress/gzip"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/cookiejar"
@@ -37,6 +39,7 @@ var (
 		"Accept-Language":  `zh-CN,zh;q=0.9,en-US;q=0.8,en;q=0.7`,
 		"Cache-Control":    `no-cache`,
 		"Connection":       `keep-alive`,
+		"Content-Type":     `application/x-www-form-urlencoded; charset=UTF-8`,
 		"Host":             `app.buaa.edu.cn`,
 		"Pragma":           `no-cache`,
 		"Referer":          `https://app.buaa.edu.cn/site/buaaStudentNcov/index`,
@@ -75,6 +78,11 @@ type infoRespBody struct {
 	D infoD  `json:"d"`
 }
 
+type saveRespBody struct {
+	E int    `json:"e"`
+	M string `json:"m"`
+}
+
 type Clock struct {
 	loginURL string
 	infoURL  string
@@ -85,6 +93,14 @@ type Clock struct {
 	username string
 	password string
 
+	boarder          string
+	notBoarderReasen string
+	notBoarderNote   string
+	address          string
+	area             string
+	city             string
+	province         string
+
 	client http.Client
 }
 
@@ -92,17 +108,34 @@ func NewClock(configs ...Config) *Clock {
 	cfg := configDefault(configs...)
 	jar, _ := cookiejar.New(nil)
 
-	return &Clock{
-		loginURL: cfg.LoginURL,
-		infoURL:  cfg.InfoURL,
-		saveURL:  cfg.SaveURL,
-		retry:    cfg.Retry,
-		username: cfg.UserName,
-		password: cfg.Password,
+	clock := &Clock{
+		loginURL:         cfg.LoginURL,
+		infoURL:          cfg.InfoURL,
+		saveURL:          cfg.SaveURL,
+		retry:            cfg.Retry,
+		username:         cfg.UserName,
+		password:         cfg.Password,
+		boarder:          cfg.Boarder,
+		notBoarderReasen: cfg.NotBoarderReasen,
+		notBoarderNote:   cfg.NotBoarderNote,
 		client: http.Client{
 			Jar: jar,
 		},
 	}
+
+	if cfg.Boarder == "1" {
+		clock.address = cfg.BoarderAddress
+		clock.area = cfg.BoarderArea
+		clock.city = cfg.BoarderCity
+		clock.province = cfg.BoarderProvince
+	} else {
+		clock.address = cfg.NotBoarderAddress
+		clock.area = cfg.NotBoarderArea
+		clock.city = cfg.NotBoarderCity
+		clock.province = cfg.NotBoarderProvince
+	}
+
+	return clock
 }
 
 func (c *Clock) login() error {
@@ -120,6 +153,7 @@ func (c *Clock) login() error {
 		Method: http.MethodPost,
 		URL:    path,
 		Body:   io.NopCloser(strings.NewReader(reqVal.Encode())),
+		Header: make(http.Header),
 	}
 
 	// set header
@@ -136,7 +170,13 @@ func (c *Clock) login() error {
 		return errors.New("login request error with status " + resp.Status)
 	}
 
-	respBody, err := io.ReadAll(resp.Body)
+	gr, err := gzip.NewReader(resp.Body)
+	if err != nil {
+		return err
+	}
+	defer gr.Close()
+
+	respBody, err := io.ReadAll(gr)
 	if err != nil {
 		return err
 	}
@@ -163,6 +203,7 @@ func (c *Clock) info() (*infoRespBody, error) {
 	req := &http.Request{
 		Method: http.MethodGet,
 		URL:    url,
+		Header: make(http.Header),
 	}
 
 	// set header
@@ -179,7 +220,13 @@ func (c *Clock) info() (*infoRespBody, error) {
 		return nil, errors.New("info request error with status " + resp.Status)
 	}
 
-	respBody, err := io.ReadAll(resp.Body)
+	gr, err := gzip.NewReader(resp.Body)
+	if err != nil {
+		return nil, err
+	}
+	defer gr.Close()
+
+	respBody, err := io.ReadAll(gr)
 	if err != nil {
 		return nil, err
 	}
@@ -198,10 +245,100 @@ func (c *Clock) info() (*infoRespBody, error) {
 }
 
 func (c *Clock) save(info *infoRespBody) error {
+	data := info.D.Info
+
+	// set params
+	data["sfzs"] = c.boarder
+	data["address"] = c.address
+	data["area"] = c.area
+	data["city"] = c.city
+	data["province"] = c.province
+	if c.boarder == "0" {
+		data["bzxyy"] = c.notBoarderReasen
+		if c.notBoarderReasen == "6" {
+			data["bzxyy_other"] = c.notBoarderNote
+		}
+	} else {
+		data["bzxyy"] = ""
+		data["bzxyy_other"] = ""
+	}
+
+	// set dy params
+	data["realname"] = info.D.UInfo.Realname
+	data["number"] = info.D.UInfo.Role.Number
+
+	// lack param
+	data["is_move"] = ""
+
+	path, err := url.Parse(c.saveURL)
+	if err != nil {
+		return err
+	}
+
+	reqBody := url.Values{}
+	for k, v := range data {
+		switch rv := v.(type) {
+		case int:
+			reqBody.Set(k, fmt.Sprint(rv))
+		case string:
+			reqBody.Set(k, rv)
+		case float64:
+			reqBody.Set(k, fmt.Sprint(rv))
+		default:
+			continue
+		}
+	}
+
+	req := &http.Request{
+		Method: http.MethodPost,
+		URL:    path,
+		Header: make(http.Header),
+		Body:   io.NopCloser(strings.NewReader(reqBody.Encode())),
+	}
+
+	// set header
+	for k, v := range infoHeader {
+		req.Header.Add(k, v)
+	}
+
+	resp, err := c.client.Do(req)
+	if err != nil {
+		return err
+	}
+
+	if resp.StatusCode != 200 {
+		return errors.New("save request error with status " + resp.Status)
+	}
+
+	gr, err := gzip.NewReader(resp.Body)
+	if err != nil {
+		return err
+	}
+	defer gr.Close()
+
+	respBody, err := io.ReadAll(gr)
+	if err != nil {
+		return err
+	}
+
+	body := saveRespBody{}
+	err = json.Unmarshal(respBody, &body)
+	if err != nil {
+		return err
+	}
+
+	if body.E != 0 {
+		return errors.New(body.M)
+	}
+
 	return nil
 }
 
 func (c *Clock) exec() error {
+	if c.username == "" || c.password == "" {
+		return errors.New("username or password is empty")
+	}
+
 	if err := c.login(); err != nil {
 		return err
 	}
