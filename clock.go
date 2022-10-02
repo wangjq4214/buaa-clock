@@ -349,6 +349,9 @@ func (c *Clock) exec() error {
 	}
 
 	if err := c.save(infoBody); err != nil {
+		if strings.HasSuffix(err.Error(), "今天已经填报了") {
+			return nil
+		}
 		return err
 	}
 

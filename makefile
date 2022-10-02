@@ -1,5 +1,5 @@
 VERSION=0.1.0
-PREFIX=login
+PREFIX=clock
 
 build:
 	go build -ldflags "-X main.Version=${VERSION}" -o ./bin/ ./cmd
