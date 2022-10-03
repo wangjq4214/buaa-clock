@@ -78,35 +78,37 @@ var timingCmd = &cobra.Command{
 
 		s := gocron.NewScheduler(time.UTC)
 		s.Every(1).Day().At("17:10").Do(func() {
-			for _, v := range cfg.Users {
-				pool.Submit(func() {
-					config := buaaclock.Config{
-						UserName: v.UserName,
-						Password: v.Password,
-					}
+			for _, user := range cfg.Users {
+				func(v item) {
+					pool.Submit(func() {
+						config := buaaclock.Config{
+							UserName: v.UserName,
+							Password: v.Password,
+						}
 
-					if v.Boarder == "0" {
-						config.Boarder = "0"
-						config.NotBoarderReasen = v.NotBoarderReasen
-						config.NotBoarderNote = v.NotBoarderNote
-						config.NotBoarderAddress = v.Address
-						config.NotBoarderArea = v.Area
-						config.NotBoarderCity = v.City
-						config.NotBoarderProvince = v.Province
-					} else {
-						config.Boarder = "1"
-						config.BoarderAddress = v.Address
-						config.BoarderArea = v.Area
-						config.BoarderCity = v.City
-						config.BoarderProvince = v.Province
-					}
+						if v.Boarder == "0" {
+							config.Boarder = "0"
+							config.NotBoarderReasen = v.NotBoarderReasen
+							config.NotBoarderNote = v.NotBoarderNote
+							config.NotBoarderAddress = v.Address
+							config.NotBoarderArea = v.Area
+							config.NotBoarderCity = v.City
+							config.NotBoarderProvince = v.Province
+						} else {
+							config.Boarder = "1"
+							config.BoarderAddress = v.Address
+							config.BoarderArea = v.Area
+							config.BoarderCity = v.City
+							config.BoarderProvince = v.Province
+						}
 
-					clock := buaaclock.NewClock(config)
-					if err := clock.Exec(); err != nil {
-						log.Println(err)
-						return
-					}
-				})
+						clock := buaaclock.NewClock(config)
+						if err := clock.Exec(); err != nil {
+							log.Println(err)
+							return
+						}
+					})
+				}(user)
 			}
 		})
 
