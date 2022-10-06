@@ -49,7 +49,7 @@ var timingCmd = &cobra.Command{
 			return
 		}
 
-		s := gocron.NewScheduler(time.UTC)
+		s := gocron.NewScheduler(time.Local)
 		s.Every(1).Day().At("17:10").Do(func() {
 			errs := clockForMutileUser(cfg)
 			for _, v := range errs {
